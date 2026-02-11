@@ -4,6 +4,29 @@ import json
 import time
 import os
 from datetime import datetime
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# =========================
+# HEALTHCHECK SERVER (RENDER FIX)
+# =========================
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def start_health_server():
+    # Render expects the service to bind to PORT (default 10000)
+    port = int(os.getenv("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    print(f"Healthcheck server running on port {port}")
+    server.serve_forever()
+
+# Start health server in background
+threading.Thread(target=start_health_server, daemon=True).start()
+
 
 # =========================
 # MQTT SETTINGS
@@ -36,7 +59,6 @@ def on_connect(client, userdata, flags, rc):
     else:
         print(f"Connection failed with code {rc}")
 
-
 def on_message(client, userdata, msg):
     try:
         payload = msg.payload.decode()
@@ -44,17 +66,15 @@ def on_message(client, userdata, msg):
 
         data = json.loads(payload)
 
-        # add timestamp if missing
+        # Add timestamp if missing
         if "timestamp" not in data:
             data["timestamp"] = datetime.utcnow()
 
         collection.insert_one(data)
-
         print("Saved to MongoDB")
 
     except Exception as e:
         print("Error processing message:", e)
-
 
 # =========================
 # MQTT CLIENT SETUP
@@ -67,11 +87,14 @@ client.on_connect = on_connect
 client.on_message = on_message
 
 client.connect(HOST, PORT, keepalive=60)
-
 client.loop_start()
 
-# keep script running
+# =========================
+# KEEP SCRIPT RUNNING
+# =========================
+
 try:
+    print("MQTT subscriber running...")
     while True:
         time.sleep(1)
 
