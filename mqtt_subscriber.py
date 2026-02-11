@@ -3,7 +3,7 @@ from pymongo import MongoClient
 import json
 import time
 import os
-from datetime import datetime
+from datetime import datetime, UTC
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -18,13 +18,11 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"OK")
 
 def start_health_server():
-    # Render expects the service to bind to PORT (default 10000)
     port = int(os.getenv("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    print(f"Healthcheck server running on port {port}")
+    print(f"[Healthcheck] Running on port {port}")
     server.serve_forever()
 
-# Start health server in background
 threading.Thread(target=start_health_server, daemon=True).start()
 
 
@@ -38,15 +36,25 @@ HOST = "automaatio.cloud.shiftr.io"
 PORT = 1883
 TOPIC = "automaatio"
 
+print("[MQTT] USERNAME:", USERNAME)
+print("[MQTT] PASSWORD loaded:", PASSWORD is not None)
+
+
 # =========================
 # MONGODB SETTINGS
 # =========================
 
 MONGO_URI = os.getenv("MONGO_URI")
+print("[MongoDB] URI:", MONGO_URI)
 
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client["person_counter"]
-collection = db["counts"]
+try:
+    mongo_client = MongoClient(MONGO_URI)
+    db = mongo_client["person_counter"]
+    collection = db["counts"]
+    print("[MongoDB] Connected successfully")
+except Exception as e:
+    print("[MongoDB] Connection error:", e)
+
 
 # =========================
 # MQTT CALLBACKS
@@ -54,27 +62,32 @@ collection = db["counts"]
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        print("Connected to MQTT broker")
+        print("[MQTT] Connected successfully")
         client.subscribe(TOPIC)
+        print(f"[MQTT] Subscribed to topic: {TOPIC}")
     else:
-        print(f"Connection failed with code {rc}")
+        print(f"[MQTT] Connection failed with code {rc}")
 
 def on_message(client, userdata, msg):
+    payload = msg.payload.decode()
+    print("[MQTT] Raw payload:", payload)
+
     try:
-        payload = msg.payload.decode()
-        print("Received:", payload)
-
         data = json.loads(payload)
+    except Exception as e:
+        print("[ERROR] JSON decode failed:", e)
+        return
 
-        # Add timestamp if missing
+    try:
         if "timestamp" not in data:
-            data["timestamp"] = datetime.utcnow()
+            data["timestamp"] = datetime.now(UTC)
 
-        collection.insert_one(data)
-        print("Saved to MongoDB")
+        result = collection.insert_one(data)
+        print("[MongoDB] Inserted document ID:", result.inserted_id)
 
     except Exception as e:
-        print("Error processing message:", e)
+        print("[MongoDB ERROR] Insert failed:", e)
+
 
 # =========================
 # MQTT CLIENT SETUP
@@ -86,19 +99,22 @@ client.username_pw_set(USERNAME, PASSWORD)
 client.on_connect = on_connect
 client.on_message = on_message
 
+print("[MQTT] Connecting to broker...")
 client.connect(HOST, PORT, keepalive=60)
 client.loop_start()
+
 
 # =========================
 # KEEP SCRIPT RUNNING
 # =========================
 
+print("[System] MQTT subscriber running...")
+
 try:
-    print("MQTT subscriber running...")
     while True:
         time.sleep(1)
 
 except KeyboardInterrupt:
-    print("Disconnecting...")
+    print("[System] Disconnecting...")
     client.loop_stop()
     client.disconnect()
