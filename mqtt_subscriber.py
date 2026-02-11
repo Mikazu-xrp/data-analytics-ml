@@ -27,16 +27,17 @@ threading.Thread(target=start_health_server, daemon=True).start()
 
 
 # =========================
-# MQTT SETTINGS (FROM TASK)
+# MQTT SETTINGS (MATCH TEACHER)
 # =========================
 
 HOST = "automaatio.cloud.shiftr.io"
 PORT = 1883
-TOPIC = "automaatio/#"
+TOPIC = "automaatio/#"   # IMPORTANT: subscribe to ALL subtopics
+
 USERNAME = "automaatio"
 PASSWORD = "Z0od2PZF65jbtcXu"
 
-print("[MQTT] USERNAME:", USERNAME)
+print("[MQTT] Using username:", USERNAME)
 
 
 # =========================
@@ -65,50 +66,33 @@ def on_message(client, userdata, msg):
     payload = msg.payload.decode()
     print("[MQTT] Raw payload:", payload)
 
+    # Try to parse JSON
     try:
-        data = json.loads(payload)
+        obj = json.loads(payload)
     except Exception as e:
         print("[ERROR] JSON decode failed:", e)
         return
 
-    # Odotettu formaatti:
-    # {
-    #   "db_name": "data_ml",
-    #   "coll_name": "p_count",
-    #   "id": "aiot",
-    #   "person count": 13,
-    #   "DateTime": "13 Jan 2026 9:36:7"
-    # }
+    # Expected fields from ESP32:
+    # db_name, coll_name, id, person count, DateTime
 
-    db_name = data.get("db_name", "data_ml")
-    coll_name = data.get("coll_name", "p_count")
+    dbname = obj.get("db_name")
+    collname = obj.get("coll_name")
 
-    db = mongo_client[db_name]
-    collection = db[coll_name]
+    if not dbname or not collname:
+        print("[ERROR] Missing db_name or coll_name in message")
+        return
 
-    # Normalisoidaan kentät
-    person_count = data.get("person count")
-    dt_str = data.get("DateTime")
+    # Add timestamp like teacher's code
+    obj["DateTime"] = datetime.now().strftime("%d %b %Y %H:%M:%S")
 
-    # Yritetään parsia DateTime, mutta ei kaadeta jos ei onnistu
-    dt_parsed = None
-    if dt_str:
-        try:
-            dt_parsed = datetime.strptime(dt_str, "%d %b %Y %H:%M:%S")
-        except Exception as e:
-            print("[WARN] Failed to parse DateTime, storing as string:", e)
-
-    doc = {
-        "source_id": data.get("id"),
-        "person_count": person_count,
-        "datetime_raw": dt_str,
-        "datetime_parsed": dt_parsed,
-        "ingested_at": datetime.now(UTC),
-    }
+    # Insert into correct DB + collection
+    db = mongo_client[dbname]
+    coll = db[collname]
 
     try:
-        result = collection.insert_one(doc)
-        print(f"[MongoDB] Inserted into {db_name}.{coll_name}, id: {result.inserted_id}")
+        result = coll.insert_one(obj)
+        print(f"[MongoDB] Inserted into {dbname}.{collname}, id: {result.inserted_id}")
     except Exception as e:
         print("[MongoDB ERROR] Insert failed:", e)
 
@@ -117,11 +101,8 @@ def on_message(client, userdata, msg):
 # MQTT CLIENT SETUP
 # =========================
 
-client = mqtt.Client()
+client = mqtt.Client(client_id="python-subscriber", clean_session=True)
 client.username_pw_set(USERNAME, PASSWORD)
-
-client.on_connect = on_connect
-client.on_message = on_message
 
 print("[MQTT] Connecting to broker...")
 client.connect(HOST, PORT, keepalive=60)
