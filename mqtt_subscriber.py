@@ -32,7 +32,7 @@ threading.Thread(target=start_health_server, daemon=True).start()
 
 HOST = "automaatio.cloud.shiftr.io"
 PORT = 1883
-TOPIC = "automaatio"
+TOPIC = "automaatio/#"
 USERNAME = "automaatio"
 PASSWORD = "Z0od2PZF65jbtcXu"
 
