@@ -27,17 +27,16 @@ threading.Thread(target=start_health_server, daemon=True).start()
 
 
 # =========================
-# MQTT SETTINGS
+# MQTT SETTINGS (FROM TASK)
 # =========================
 
-USERNAME = os.getenv("MQTT_USER")
-PASSWORD = os.getenv("MQTT_PASS")
 HOST = "automaatio.cloud.shiftr.io"
 PORT = 1883
 TOPIC = "automaatio"
+USERNAME = "automaatio"
+PASSWORD = "Z0od2PZF65jbtcXu"
 
 print("[MQTT] USERNAME:", USERNAME)
-print("[MQTT] PASSWORD loaded:", PASSWORD is not None)
 
 
 # =========================
@@ -47,13 +46,7 @@ print("[MQTT] PASSWORD loaded:", PASSWORD is not None)
 MONGO_URI = os.getenv("MONGO_URI")
 print("[MongoDB] URI:", MONGO_URI)
 
-try:
-    mongo_client = MongoClient(MONGO_URI)
-    db = mongo_client["person_counter"]
-    collection = db["counts"]
-    print("[MongoDB] Connected successfully")
-except Exception as e:
-    print("[MongoDB] Connection error:", e)
+mongo_client = MongoClient(MONGO_URI)
 
 
 # =========================
@@ -78,13 +71,44 @@ def on_message(client, userdata, msg):
         print("[ERROR] JSON decode failed:", e)
         return
 
+    # Odotettu formaatti:
+    # {
+    #   "db_name": "data_ml",
+    #   "coll_name": "p_count",
+    #   "id": "aiot",
+    #   "person count": 13,
+    #   "DateTime": "13 Jan 2026 9:36:7"
+    # }
+
+    db_name = data.get("db_name", "data_ml")
+    coll_name = data.get("coll_name", "p_count")
+
+    db = mongo_client[db_name]
+    collection = db[coll_name]
+
+    # Normalisoidaan kentät
+    person_count = data.get("person count")
+    dt_str = data.get("DateTime")
+
+    # Yritetään parsia DateTime, mutta ei kaadeta jos ei onnistu
+    dt_parsed = None
+    if dt_str:
+        try:
+            dt_parsed = datetime.strptime(dt_str, "%d %b %Y %H:%M:%S")
+        except Exception as e:
+            print("[WARN] Failed to parse DateTime, storing as string:", e)
+
+    doc = {
+        "source_id": data.get("id"),
+        "person_count": person_count,
+        "datetime_raw": dt_str,
+        "datetime_parsed": dt_parsed,
+        "ingested_at": datetime.now(UTC),
+    }
+
     try:
-        if "timestamp" not in data:
-            data["timestamp"] = datetime.now(UTC)
-
-        result = collection.insert_one(data)
-        print("[MongoDB] Inserted document ID:", result.inserted_id)
-
+        result = collection.insert_one(doc)
+        print(f"[MongoDB] Inserted into {db_name}.{coll_name}, id: {result.inserted_id}")
     except Exception as e:
         print("[MongoDB ERROR] Insert failed:", e)
 
