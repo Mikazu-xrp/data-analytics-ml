@@ -5,34 +5,33 @@ import time
 import os
 from datetime import datetime, UTC
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from flask import Flask
 
-# =========================
-# HEALTHCHECK SERVER (RENDER)
-# =========================
+# ============================================================
+# 1. FLASK HEALTHCHECK (TÄRKEIN KORJAUS RENDERIÄ VARTEN)
+# ============================================================
 
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
+app = Flask(__name__)
 
-def start_health_server():
+@app.get("/")
+def home():
+    return "OK", 200
+
+def start_web():
     port = int(os.getenv("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    print(f"[Healthcheck] Running on port {port}")
-    server.serve_forever()
+    print(f"[Web] Flask health server running on port {port}")
+    app.run(host="0.0.0.0", port=port)
 
-threading.Thread(target=start_health_server, daemon=True).start()
+threading.Thread(target=start_web, daemon=True).start()
 
 
-# =========================
-# MQTT SETTINGS
-# =========================
+# ============================================================
+# 2. MQTT SETTINGS
+# ============================================================
 
 HOST = "automaatio.cloud.shiftr.io"
 PORT = 1883
-TOPIC = "automaatio"   # TÄRKEÄ: ESP32 lähettää TÄHÄN
+TOPIC = "automaatio"   # ESP32 lähettää TÄHÄN topicciin
 
 USERNAME = os.getenv("MQTT_USER", "automaatio")
 PASSWORD = os.getenv("MQTT_PASS", "Z0od2PZF65jbtcXu")
@@ -41,19 +40,19 @@ print("[MQTT] USERNAME:", USERNAME)
 print("[MQTT] PASSWORD loaded:", PASSWORD is not None)
 
 
-# =========================
-# MONGODB SETTINGS
-# =========================
+# ============================================================
+# 3. MONGODB SETTINGS
+# ============================================================
 
 MONGO_URI = os.getenv("MONGO_URI")
-print("[MongoDB] URI:", MONGO_URI)
+print("[MongoDB] URI loaded:", MONGO_URI is not None)
 
 mongo_client = MongoClient(MONGO_URI)
 
 
-# =========================
-# MQTT CALLBACKS
-# =========================
+# ============================================================
+# 4. MQTT CALLBACKS
+# ============================================================
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -67,12 +66,14 @@ def on_message(client, userdata, msg):
     payload = msg.payload.decode()
     print("[MQTT] Raw payload:", payload)
 
+    # Parse JSON
     try:
         obj = json.loads(payload)
     except Exception as e:
         print("[ERROR] JSON decode failed:", e)
         return
 
+    # Extract DB + collection
     dbname = obj.get("db_name")
     collname = obj.get("coll_name")
 
@@ -80,16 +81,19 @@ def on_message(client, userdata, msg):
         print("[ERROR] Missing db_name or coll_name in message")
         return
 
+    # Add timestamps
     now = datetime.now(UTC)
     obj["datetime_raw"] = now.strftime("%d %b %Y %H:%M:%S")
     obj["datetime_parsed"] = now
     obj["ingested_at"] = now
 
+    # Normalize fields
     if "id" in obj:
         obj["source_id"] = obj["id"]
     if "person count" in obj:
         obj["person_count"] = obj["person count"]
 
+    # Insert into MongoDB
     db = mongo_client[dbname]
     coll = db[collname]
 
@@ -100,9 +104,9 @@ def on_message(client, userdata, msg):
         print("[MongoDB ERROR] Insert failed:", e)
 
 
-# =========================
-# MQTT CLIENT SETUP
-# =========================
+# ============================================================
+# 5. MQTT CLIENT SETUP
+# ============================================================
 
 client = mqtt.Client(client_id="mqtt-sub-render", clean_session=True)
 client.username_pw_set(USERNAME, PASSWORD)
@@ -115,9 +119,9 @@ client.connect(HOST, PORT, keepalive=60)
 client.loop_start()
 
 
-# =========================
-# KEEP SCRIPT RUNNING
-# =========================
+# ============================================================
+# 6. KEEP SCRIPT RUNNING
+# ============================================================
 
 print("[System] MQTT subscriber running...")
 
