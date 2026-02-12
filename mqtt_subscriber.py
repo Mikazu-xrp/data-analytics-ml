@@ -32,7 +32,7 @@ threading.Thread(target=start_health_server, daemon=True).start()
 
 HOST = "automaatio.cloud.shiftr.io"
 PORT = 1883
-TOPIC = "automaatio/#"   # tärkeä: kaikki alitopicit
+TOPIC = "automaatio"   # tärkeä: kaikki alitopicit
 
 USERNAME = os.getenv("MQTT_USER", "automaatio")
 PASSWORD = os.getenv("MQTT_PASS", "Z0od2PZF65jbtcXu")
