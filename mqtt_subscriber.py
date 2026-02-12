@@ -32,7 +32,7 @@ threading.Thread(target=start_health_server, daemon=True).start()
 
 HOST = "automaatio.cloud.shiftr.io"
 PORT = 1883
-TOPIC = "automaatio"   # tärkeä: kaikki alitopicit
+TOPIC = "automaatio"   # TÄRKEÄ: ESP32 lähettää TÄHÄN
 
 USERNAME = os.getenv("MQTT_USER", "automaatio")
 PASSWORD = os.getenv("MQTT_PASS", "Z0od2PZF65jbtcXu")
@@ -67,20 +67,11 @@ def on_message(client, userdata, msg):
     payload = msg.payload.decode()
     print("[MQTT] Raw payload:", payload)
 
-    # Yritetään parsia JSON
     try:
         obj = json.loads(payload)
     except Exception as e:
         print("[ERROR] JSON decode failed:", e)
         return
-
-    # Odotettu rakenne:
-    # {
-    #   "db_name": "data_ml",
-    #   "coll_name": "p_count",
-    #   "id": "aiot",
-    #   "person count": 0
-    # }
 
     dbname = obj.get("db_name")
     collname = obj.get("coll_name")
@@ -89,14 +80,11 @@ def on_message(client, userdata, msg):
         print("[ERROR] Missing db_name or coll_name in message")
         return
 
-    # Lisätään aikaleimat Python-puolella
     now = datetime.now(UTC)
     obj["datetime_raw"] = now.strftime("%d %b %Y %H:%M:%S")
     obj["datetime_parsed"] = now
     obj["ingested_at"] = now
 
-    # Halutessasi voit myös mapata kenttiä:
-    # esim. "id" -> "source_id", "person count" -> "person_count"
     if "id" in obj:
         obj["source_id"] = obj["id"]
     if "person count" in obj:
