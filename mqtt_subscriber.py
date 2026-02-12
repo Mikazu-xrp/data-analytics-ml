@@ -8,7 +8,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # =========================
-# HEALTHCHECK SERVER (RENDER FIX)
+# HEALTHCHECK SERVER (RENDER)
 # =========================
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -27,17 +27,18 @@ threading.Thread(target=start_health_server, daemon=True).start()
 
 
 # =========================
-# MQTT SETTINGS (MATCH TEACHER)
+# MQTT SETTINGS
 # =========================
 
 HOST = "automaatio.cloud.shiftr.io"
 PORT = 1883
-TOPIC = "automaatio/#"   # IMPORTANT: subscribe to ALL subtopics
+TOPIC = "automaatio/#"   # tärkeä: kaikki alitopicit
 
-USERNAME = "automaatio"
-PASSWORD = "Z0od2PZF65jbtcXu"
+USERNAME = os.getenv("MQTT_USER", "automaatio")
+PASSWORD = os.getenv("MQTT_PASS", "Z0od2PZF65jbtcXu")
 
-print("[MQTT] Using username:", USERNAME)
+print("[MQTT] USERNAME:", USERNAME)
+print("[MQTT] PASSWORD loaded:", PASSWORD is not None)
 
 
 # =========================
@@ -66,14 +67,21 @@ def on_message(client, userdata, msg):
     payload = msg.payload.decode()
     print("[MQTT] Raw payload:", payload)
 
-    # Try to parse JSON
+    # Yritetään parsia JSON
     try:
         obj = json.loads(payload)
     except Exception as e:
         print("[ERROR] JSON decode failed:", e)
         return
 
-    # Extract DB and collection names
+    # Odotettu rakenne:
+    # {
+    #   "db_name": "data_ml",
+    #   "coll_name": "p_count",
+    #   "id": "aiot",
+    #   "person count": 0
+    # }
+
     dbname = obj.get("db_name")
     collname = obj.get("coll_name")
 
@@ -81,13 +89,19 @@ def on_message(client, userdata, msg):
         print("[ERROR] Missing db_name or coll_name in message")
         return
 
-    # Add timestamp fields
+    # Lisätään aikaleimat Python-puolella
     now = datetime.now(UTC)
     obj["datetime_raw"] = now.strftime("%d %b %Y %H:%M:%S")
     obj["datetime_parsed"] = now
     obj["ingested_at"] = now
 
-    # Insert into correct DB + collection
+    # Halutessasi voit myös mapata kenttiä:
+    # esim. "id" -> "source_id", "person count" -> "person_count"
+    if "id" in obj:
+        obj["source_id"] = obj["id"]
+    if "person count" in obj:
+        obj["person_count"] = obj["person count"]
+
     db = mongo_client[dbname]
     coll = db[collname]
 
@@ -98,15 +112,17 @@ def on_message(client, userdata, msg):
         print("[MongoDB ERROR] Insert failed:", e)
 
 
-
 # =========================
 # MQTT CLIENT SETUP
 # =========================
 
-client = mqtt.Client(client_id="python-subscriber", clean_session=True)
+client = mqtt.Client(client_id="mqtt-sub-render", clean_session=True)
 client.username_pw_set(USERNAME, PASSWORD)
 
 print("[MQTT] Connecting to broker...")
+client.on_connect = on_connect
+client.on_message = on_message
+
 client.connect(HOST, PORT, keepalive=60)
 client.loop_start()
 
