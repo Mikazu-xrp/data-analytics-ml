@@ -73,9 +73,7 @@ def on_message(client, userdata, msg):
         print("[ERROR] JSON decode failed:", e)
         return
 
-    # Expected fields from ESP32:
-    # db_name, coll_name, id, person count, DateTime
-
+    # Extract DB and collection names
     dbname = obj.get("db_name")
     collname = obj.get("coll_name")
 
@@ -83,8 +81,11 @@ def on_message(client, userdata, msg):
         print("[ERROR] Missing db_name or coll_name in message")
         return
 
-    # Add timestamp like teacher's code
-    obj["DateTime"] = datetime.now().strftime("%d %b %Y %H:%M:%S")
+    # Add timestamp fields
+    now = datetime.now(UTC)
+    obj["datetime_raw"] = now.strftime("%d %b %Y %H:%M:%S")
+    obj["datetime_parsed"] = now
+    obj["ingested_at"] = now
 
     # Insert into correct DB + collection
     db = mongo_client[dbname]
@@ -95,6 +96,7 @@ def on_message(client, userdata, msg):
         print(f"[MongoDB] Inserted into {dbname}.{collname}, id: {result.inserted_id}")
     except Exception as e:
         print("[MongoDB ERROR] Insert failed:", e)
+
 
 
 # =========================
